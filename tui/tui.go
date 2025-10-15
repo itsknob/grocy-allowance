@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"example.com/grocy-allowance/grocy"
@@ -24,7 +25,6 @@ type model struct {
 }
 
 func InitModel(initialChoices []string) model {
-
 	config := grocy.GrocyConfig{
 		GROCY_URL: os.Getenv("GROCY_URL"),
 	}
@@ -40,7 +40,7 @@ func InitModel(initialChoices []string) model {
 
 func (m *model) printStock() {
 
-	var items *[]grocy.Item
+	var items *[]grocy.StockEntry
 	var err error
 	items, err = m.grocyClient.GetStock()
 	if err != nil {
@@ -48,11 +48,23 @@ func (m *model) printStock() {
 		os.Exit(0)
 	}
 
+	fmt.Printf("| ------------------------------------ | ------------------------------------ | ---------- |\r\n")
+	fmt.Printf("| %-36s | %-36s | %10s |\r\n", "Name", "Quantity", "Units")
+	fmt.Printf("| ------------------------------------ | ------------------------------------ | ---------- |\r\n")
 	for _, item := range *items {
 		// fmt.Println(item.Product.Name)
-		fmt.Printf("| %36s | %36d |\r\n", item.Product.Name, item.Product.Id)
+		units := m.grocyClient.GetUnits()
+		if units == "" {
+			units = "Units"
+		}
+		fmt.Printf("| %36s | %36f | %10s |\r\n", item.StockId, item.Amount, "units")
 
 	}
+	fmt.Printf("| ------------------------------------ | ------------------------------------ |\r\n")
+}
+
+func (m *model) printAllowancePage() {
+	log.Fatal("Not implemented")
 }
 
 func (m model) Init() tea.Cmd {
@@ -89,7 +101,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func getAndPrintStock() {
+func (m model) AllowanceViewMain() {
 
 }
 

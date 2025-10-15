@@ -35,7 +35,7 @@ func main() {
 	initialChoices := []string{"Get Stock"}
 	p := tea.NewProgram(tui.InitModel(initialChoices))
 	if _, err := p.Run(); err != nil {
-		fmt.Println("Error: %v", err)
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 }
