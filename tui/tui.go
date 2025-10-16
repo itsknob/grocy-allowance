@@ -24,9 +24,21 @@ type model struct {
 	grocyClient grocy.GrocyClient
 }
 
+func (m model) Init() tea.Cmd {
+	if m.grocyClient.HasAllowance() {
+		return nil
+	} else {
+		m.grocyClient.InitAllowance()
+		return nil
+	}
+}
+
 func InitModel(initialChoices []string) model {
 	config := grocy.GrocyConfig{
 		GROCY_URL: os.Getenv("GROCY_URL"),
+	}
+	if config.GROCY_URL == "" {
+		log.Fatal("GROCY_URL env variable is not set.")
 	}
 
 	grocyClient := grocy.NewGrocyClient(config.GROCY_URL)
@@ -67,9 +79,9 @@ func (m *model) printAllowancePage() {
 	log.Fatal("Not implemented")
 }
 
-func (m model) Init() tea.Cmd {
-	return nil // no I/O right now
-}
+// func (m model) Init() tea.Cmd {
+// 	return nil // no I/O right now
+// }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -89,10 +101,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter", " ":
 			_, ok := m.selected[m.cursor]
 			if ok {
-				delete(m.selected, m.cursor)
+				// delete(m.selected, m.cursor)
+				m.printAllowancePage()
 			} else {
-				// m.selected[m.cursor] = struct{}{}
-				m.printStock()
+				// m.printStock()
+				m.selected[m.cursor] = struct{}{}
 			}
 		}
 	}
@@ -108,7 +121,7 @@ func (m model) AllowanceViewMain() {
 // View implements tea.Model.
 func (m model) View() string {
 	// header
-	s := "What do you need to buy?\n"
+	s := "Select a menu option:\n"
 
 	for i, choice := range m.choices {
 		// Is the cursor here?

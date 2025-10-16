@@ -32,7 +32,7 @@ func main() {
 	//
 	// }
 	// initialChoices := []string{"Buy Carrots", "Buy Celery", "Buy Potatoes"}
-	initialChoices := []string{"Get Stock"}
+	initialChoices := []string{"Deposit", "Withdrawl", "Balance"}
 	p := tea.NewProgram(tui.InitModel(initialChoices))
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)

@@ -1,6 +1,7 @@
 package grocy
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log"
@@ -66,6 +67,27 @@ type GrocyClient struct {
 	client  *http.Client
 }
 
+func (c *GrocyClient) InitAllowance() {
+	body := []byte(`{ "json": "body"}`)
+	req, err := http.NewRequest("POST", "/objects/userentities", bytes.NewBuffer(body))
+	if err != nil {
+		log.Fatal("Failed to create new request for new user entity")
+	}
+	req.Header.Add("GROCY-API-KEY", os.Getenv("GROCY_API_KEY"))
+	req.Header.Add("accept", "application/json")
+	// req, err := c.createRequestWithHeaders("POST", "/objects/userentities", bytes.NewBuffer(body))
+	resp, err := c.client.Do(req)
+	if err != nil {
+		log.Fatal("Failed to create new user entity: Allowance")
+	}
+	if resp.StatusCode == 200 {
+		return
+	} else {
+		log.Fatal("Request to create new user entity failed.")
+	}
+	log.Default().Print("Created 'Allowance' user entity")
+}
+
 func (c *GrocyClient) HasAllowance() bool {
 	req, err := c.createRequestWithHeaders("GET", "/objects/userentities?query[]=name=Allowance", nil)
 	if err != nil {
@@ -83,12 +105,12 @@ func (c *GrocyClient) HasAllowance() bool {
 		Name              string `json:"name"`
 		Caption           string `json:"caption"`
 		Description       string `json:"description"`
-		ShowInSidebarMenu int    `json:"Show_in_sidebar_menu"`
+		ShowInSidebarMenu int    `json:"show_in_sidebar_menu"`
 		IconCssClass      string `json:"icon_css_class"`
 		CreatedDate       string `json:"row_created_timestamp"`
 	}
 
-	var temp []byte
+	var temp []UserEntitiesQueryResponse
 	if err := json.NewDecoder(resp.Body).Decode(&temp); err != nil {
 		return false
 	}
@@ -123,9 +145,16 @@ func NewGrocyClient(baseUrl string) *GrocyClient {
 		os.Getenv("GROCY_URL"),
 	}
 
-	return &GrocyClient{
+	c := &GrocyClient{
 		baseUrl: config.GROCY_URL,
 		client:  &http.Client{},
+	}
+
+	if c.HasAllowance() {
+		return c
+	} else {
+		c.InitAllowance()
+		return c
 	}
 }
 
