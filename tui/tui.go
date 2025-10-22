@@ -4,9 +4,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
+	"time"
 
 	"example.com/grocy-allowance/grocy"
+	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 /**
@@ -17,23 +22,73 @@ import (
 * View - a function that renders the UI based on data in model
  */
 
-type model struct {
-	choices     []string
-	cursor      int
-	selected    map[int]struct{}
-	grocyClient grocy.GrocyClient
+const (
+	PAGE_HOME      = "Home"
+	PAGE_DEPOSIT   = "Deposit"
+	PAGE_WITHDRAWL = "Withdrawl"
+	PAGE_BALANCE   = "Balance"
+)
+
+var (
+	focusedStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	blurredStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	cursorStyle         = focusedStyle
+	noStyle             = lipgloss.NewStyle()
+	helpStyle           = blurredStyle
+	cursorModeHelpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+
+	focusedButton = focusedStyle.Render("[ Submit ]")
+	blurredButton = fmt.Sprintf("[ %s ]", blurredStyle.Render("Submit"))
+)
+
+// Application State
+type allowanceModel struct {
+	menuOptions        []string          // Menu Options
+	pageOptions        []string          // Page Options
+	focusIndex         int               // Current Position
+	selectedMenuOption string            // Current Page
+	selectedPageOption string            // Current Input
+	pageInputs         []textinput.Model // Text Inputs on Page
+	grocyClient        grocy.GrocyClient // Client
 }
 
-func (m model) Init() tea.Cmd {
-	if m.grocyClient.HasAllowance() {
-		return nil
-	} else {
-		m.grocyClient.InitAllowance()
-		return nil
+// Initialize the Application State, Return Model
+func InitialModel() allowanceModel {
+	m := allowanceModel{
+		pageInputs: make([]textinput.Model, 3),
 	}
-}
+	var t textinput.Model
+	for i := range m.pageInputs {
+		t = textinput.New()
+		t.Cursor.Style = cursorStyle
+		t.CharLimit = 32
 
-func InitModel(initialChoices []string) model {
+		switch i {
+		// User
+		case 0:
+			t.Prompt = "User:"
+			t.Width = 32
+			t.Placeholder = "Dad"
+			t.Focus()
+			t.PromptStyle = focusedStyle
+			t.TextStyle = focusedStyle
+			// Amount
+		case 1:
+			t.Prompt = "Amount:"
+			t.Width = 32
+			t.Placeholder = "0.00"
+			t.CharLimit = 7 // 9999.99
+			// Date
+		case 2:
+			t.Prompt = "Date:"
+			t.Width = 32
+			t.Placeholder = time.Now().Format("YYYY-MM-DD")
+		}
+
+		m.pageInputs[i] = t
+
+	}
+
 	config := grocy.GrocyConfig{
 		GROCY_URL: os.Getenv("GROCY_URL"),
 	}
@@ -43,107 +98,196 @@ func InitModel(initialChoices []string) model {
 
 	grocyClient := grocy.NewGrocyClient(config.GROCY_URL)
 
-	return model{
-		choices:     initialChoices,
-		selected:    make(map[int]struct{}),
-		grocyClient: *grocyClient,
+	// Ensure Allowance Exists
+	if !grocyClient.HasAllowance() {
+		log.Default().Println("Allowance not found. Setting up new userentity")
+		grocyClient.InitAllowance()
+	}
+
+	// Initial Menu Options
+	m.menuOptions = []string{PAGE_HOME, PAGE_DEPOSIT, PAGE_WITHDRAWL, PAGE_BALANCE}
+	m.selectedMenuOption = PAGE_HOME
+	m.grocyClient = *grocyClient
+
+	return m
+}
+
+func (m allowanceModel) Init() tea.Cmd {
+	if m.selectedMenuOption == PAGE_HOME || m.selectedMenuOption == PAGE_BALANCE {
+		return cursor.Blink
+	} else {
+		return textinput.Blink
 	}
 }
 
-func (m *model) printStock() {
+func (m allowanceModel) makeHomeMenu() []tea.Cmd {
+	// Reset State
+	m.selectedMenuOption = PAGE_HOME
 
-	var items *[]grocy.StockEntry
-	var err error
-	items, err = m.grocyClient.GetStock()
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(0)
-	}
-
-	fmt.Printf("| ------------------------------------ | ------------------------------------ | ---------- |\r\n")
-	fmt.Printf("| %-36s | %-36s | %10s |\r\n", "Name", "Quantity", "Units")
-	fmt.Printf("| ------------------------------------ | ------------------------------------ | ---------- |\r\n")
-	for _, item := range *items {
-		// fmt.Println(item.Product.Name)
-		units := m.grocyClient.GetUnits()
-		if units == "" {
-			units = "Units"
-		}
-		fmt.Printf("| %36s | %36f | %10s |\r\n", item.StockId, item.Amount, "units")
-
-	}
-	fmt.Printf("| ------------------------------------ | ------------------------------------ |\r\n")
+	// Return new Inputs for Page
+	return make([]tea.Cmd, len(m.pageInputs))
 }
 
-func (m *model) printAllowancePage() {
-	log.Fatal("Not implemented")
-}
-
-// func (m model) Init() tea.Cmd {
-// 	return nil // no I/O right now
-// }
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+/**
+* Called when things happen
+* It's a Reducer
+ */
+func (m allowanceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Switch on Type of Message Received
 	switch msg := msg.(type) {
 	// is it a kepress?
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
+		case "tab", "shift+tab", "enter", "up", "down":
+			s := msg.String()
+			// Did user press enter while submit button was focused? Exists
+			if s == "enter" && m.focusIndex == len(m.pageInputs) && m.selectedMenuOption != PAGE_HOME {
+				log.Default().Println("Submitted")
+
+				return m, nil
 			}
-		case "down", "j":
-			if m.cursor < len(m.choices)-1 {
-				m.cursor++
+
+			// 0. Home
+			// 1. Deposit
+			if s == "enter" && m.focusIndex == 1 {
+				newState := allowanceModel{
+					selectedMenuOption: PAGE_DEPOSIT,
+					pageInputs:         make([]textinput.Model, 4),
+				}
+				return newState, nil
+				// m.pageInputs = make([]textinput.Model, 4)
+
+				// var t textinput.Model
+				// for i := range m.pageInputs {
+				// 	t = textinput.New()
+				// 	t.Cursor.Style = cursorStyle
+				// 	t.CharLimit = 32
+				//
+				// 	switch i {
+				// 	// Home
+				// 	case 0:
+				// 		t.Prompt = "Home"
+				// 		// t.Focus()
+				// 		// t.PromptStyle = focusedStyle
+				// 		// t.TextStyle = focusedStyle
+				//
+				// 		// Deposit
+				// 	case 1:
+				// 		t.Prompt = "Deposit"
+				//
+				// 		// Withdrawl
+				// 	case 2:
+				// 		t.Prompt = "Withdrawl"
+				//
+				// 	// Balance
+				// 	case 3:
+				// 		t.Prompt = "Balance"
+				//
+				// 	}
+				// 	m.pageInputs[i] = t
+				// }
+				return m, nil
 			}
-		case "enter", " ":
-			_, ok := m.selected[m.cursor]
-			if ok {
-				// delete(m.selected, m.cursor)
-				m.printAllowancePage()
+
+			if s == "up" || s == "shift+tab" {
+				m.focusIndex--
 			} else {
-				// m.printStock()
-				m.selected[m.cursor] = struct{}{}
+				m.focusIndex++
 			}
+
+			if m.focusIndex > len(m.pageInputs) {
+				m.focusIndex = 0
+			} else if m.focusIndex < 0 {
+				m.focusIndex = len(m.pageInputs)
+			}
+
+			cmds := make([]tea.Cmd, len(m.pageInputs))
+			for i := 0; i <= len(m.pageInputs)-1; i++ {
+				if i == m.focusIndex {
+					// set focused state
+
+					// Debug
+					fmt.Printf("Page Inputs: %v", m.pageInputs[i].View())
+					// Debug
+
+					cmds[i] = m.pageInputs[i].Focus()
+					m.pageInputs[i].PromptStyle = focusedStyle
+					m.pageInputs[i].TextStyle = focusedStyle
+					continue
+				}
+				// remove focused state
+				m.pageInputs[i].Blur()
+				m.pageInputs[i].PromptStyle = noStyle
+				m.pageInputs[i].TextStyle = noStyle
+			}
+			return m, tea.Batch(cmds...)
 		}
+
 	}
+
+	// Handle character input and blinking
+	cmd := m.updateInputs(msg)
+
 	// Return the updated model to Tea for processing
 	// Note: Not returning command
-	return m, nil
+	return m, cmd
 }
 
-func (m model) AllowanceViewMain() {
+func (m *allowanceModel) updateInputs(msg tea.Msg) tea.Cmd {
+	cmds := make([]tea.Cmd, len(m.pageInputs))
 
+	// Only text inputs with Focus() set will response, so it's safe to simply
+	// update all of them here without further logic
+	for i := range m.pageInputs {
+		m.pageInputs[i], cmds[i] = m.pageInputs[i].Update(msg)
+	}
+
+	return tea.Batch(cmds...)
 }
 
 // View implements tea.Model.
-func (m model) View() string {
-	// header
-	s := "Select a menu option:\n"
+func (m allowanceModel) View() string {
+	var b strings.Builder
 
-	for i, choice := range m.choices {
-		// Is the cursor here?
-		cursor := " " // no cursor
-		if m.cursor == i {
-			cursor = ">" // cursor!
+	switch m.selectedMenuOption {
+	case PAGE_DEPOSIT:
+		b.WriteString("Deposit\n")
+		b.WriteString("-------\n")
+		for i := range m.pageInputs {
+			b.WriteString(m.pageInputs[i].View())
+			if i < len(m.pageInputs)-1 {
+				b.WriteRune('\n')
+			}
 		}
-
-		// is it selected?
-		checked := " "
-		if _, ok := m.selected[i]; ok {
-			checked = "x"
+		button := &blurredButton
+		if m.focusIndex == len(m.pageInputs) {
+			button = &focusedButton
 		}
+		fmt.Fprintf(&b, "\n\n%s\n\n", *button)
 
-		// render the processing
-		s += fmt.Sprintf("%s [%s] %s\n", cursor, checked, choice)
+	// PAGE_HOME
+	default:
+		// header
+		b.WriteString("Select a menu option:\n")
 
+		for i, option := range m.menuOptions {
+			// Is the cursor here?
+			cursor := " " // no cursor
+			if m.focusIndex == i {
+				cursor = ">" // cursor!
+			}
+
+			// render the row
+			b.WriteString(fmt.Sprintf("%s %s\n", cursor, option))
+
+		}
 	}
 
 	// footer
-	s += "\n Press q to quit.\n"
+	b.WriteString("\n Press q to quit.\n")
 
 	// send to UI for rendering
-	return s
+	return b.String()
 }
