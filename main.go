@@ -8,10 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type GrocyConfig struct {
-	GROCY_URL string
-}
-
 func main() {
 	p := tea.NewProgram(tui.InitialModel())
 	if _, err := p.Run(); err != nil {
