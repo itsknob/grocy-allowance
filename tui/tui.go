@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"example.com/grocy-allowance/grocy"
-	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -48,11 +47,12 @@ type Transaction struct {
 	description string
 }
 
-type DepositModel struct { // Deposit Page State
+type DepositModel struct {
 	currentTransaction Transaction
 	focusedInputIndex  int
 	focusedInput       textinput.Model
 	inputs             map[int]textinput.Model // contain their own values
+	currentUser        UserModel
 }
 
 type WithdrawlModel struct {
@@ -128,6 +128,9 @@ type ApplicationModel struct { // Application State
 	focusedInputIndex int                     // Current Position
 	inputs            map[int]textinput.Model // Menu Options
 	grocyClient       grocy.GrocyClient       // Client
+	depositModel      DepositModel
+	withdrawlModel    WithdrawlModel
+	balanceModel      BalanceModel
 }
 
 /**
@@ -135,6 +138,7 @@ type ApplicationModel struct { // Application State
 * Set's Prompts for textinputs to be menu options
  */
 func GetInitialApplicationModel() ApplicationModel {
+	log.Default().Println("Called GetInitialApplicationModel")
 	initialInputs := make(map[int]textinput.Model, 4)
 
 	// Setup Inputs with Labels
@@ -150,7 +154,10 @@ func GetInitialApplicationModel() ApplicationModel {
 		case 3:
 			current.Prompt = "Balance"
 		}
+		initialInputs[idx] = current
 	}
+
+	log.Default().Println("%v")
 
 	// Set up Grocy Client
 	config := grocy.GrocyConfig{
@@ -177,45 +184,28 @@ func GetInitialApplicationModel() ApplicationModel {
 }
 
 func (m ApplicationModel) Init() tea.Cmd {
-	if m.focusedInput.Value() == PAGE_HOME || m.focusedInput.Value() == PAGE_BALANCE {
-		GetInitialApplicationModel()
-		return cursor.Blink
-	} else {
-		return textinput.Blink
+	log.Default().Println("Called ApplicationModel#Init")
+	m.inputs = make(map[int]textinput.Model, 4)
+	var t textinput.Model
+	for i := range m.inputs {
+		t = textinput.New()
+		t.Cursor.Style = cursorStyle
+		t.CharLimit = 0
+		switch i {
+		case 0:
+			t.Prompt = "Home"
+		case 1:
+			t.Prompt = "Deposit"
+		case 2:
+			t.Prompt = "Withdrawl"
+		case 3:
+			t.Prompt = "Balance"
+		}
 	}
+	return textinput.Blink
 }
 
-// // Initialize the Application State, Return Model
-// // Deprecated
-// func InitialModel() ApplicationModel {
-// 	m := ApplicationModel{
-// 		inputs: make(map[int]textinput.Model, 3),
-// 	}
-//
-// 	config := grocy.GrocyConfig{
-// 		GROCY_URL: os.Getenv("GROCY_URL"),
-// 	}
-// 	if config.GROCY_URL == "" {
-// 		log.Fatal("GROCY_URL env variable is not set.")
-// 	}
-//
-// 	grocyClient := grocy.NewGrocyClient(config.GROCY_URL)
-//
-// 	// Ensure Allowance Exists
-// 	if !grocyClient.HasAllowance() {
-// 		log.Default().Println("Allowance not found. Setting up new userentity")
-// 		grocyClient.InitAllowance()
-// 	}
-//
-// 	// Initial Menu Options
-// 	m.inputs = []string{PAGE_HOME, PAGE_DEPOSIT, PAGE_WITHDRAWL, PAGE_BALANCE}
-// 	m.focusedInput = PAGE_HOME
-// 	m.grocyClient = *grocyClient
-//
-// 	return m
-// }
-
-func (m DepositModel) initDepositModel() tea.Cmd {
+func (m DepositModel) Init() tea.Cmd {
 	// User, Amount, Description, Date
 	m.inputs = make(map[int]textinput.Model, 4)
 
@@ -265,6 +255,7 @@ func (m DepositModel) initDepositModel() tea.Cmd {
 * It's a Reducer
  */
 func (m ApplicationModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	log.Default().Println("Called ApplicationModel#Update")
 	// Switch on Type of Message Received
 	switch msg := msg.(type) {
 	// is it a kepress?
@@ -291,22 +282,33 @@ func (m ApplicationModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case 0:
 				return updateHomePage(msg, m)
 			case 1:
-				return updateDepositPage(msg, m)
+				m.depositModel = getInitialDepositModel()
+				return m, nil
 			case 2:
 				return updateWithdrawlPage(msg, m)
 			case 3:
 				return updateBalancePage(msg, m)
+			default:
+				// // Update the Selected Page
+				// if m.focusedInputIndex != 0 { // not empty or Home
+				// 	m.focusedInput = m.inputs[m.focusedInputIndex]
+				// 	return updateSelectedPage(msg, m)
+				return updateHomePage(msg, m)
 			}
-			// Update the Selected Page
-			if m.focusedInputIndex != 0 { // not empty or Home
-				m.focusedInput = m.inputs[m.focusedInputIndex]
-				return updateSelectedPage(msg, m)
-			}
-			return updateHomePage(msg, m)
 		}
 	}
 	return m, nil
 }
+
+type newTransactionMsg struct {
+	transaction Transaction
+	balance     float32
+}
+
+/**
+* Cmds are a function that perform some I/O and return a Message
+* Update Functions handle Messages
+ */
 
 func updateBalancePage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
 	panic("unimplemented")
@@ -316,13 +318,29 @@ func updateWithdrawlPage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd
 	panic("unimplemented")
 }
 
-func updateDepositPage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
+func (m DepositModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	panic("unimplemented")
+}
+
+func (m DepositModel) View() string {
+	var b strings.Builder
+	for idx, input := range m.inputs {
+		// Is the cursor here?
+		cursor := " " // no cursor
+		if m.focusedInputIndex == idx {
+			cursor = ">" // cursor!
+		}
+
+		// render the row
+		b.WriteString(fmt.Sprintf("%s %s\n", cursor, input.Value()))
+
+	}
+	return b.String()
 }
 
 func updateSelectedPage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
 	log.Default().Println("Called updateSelectedPage")
-	panic("unimplemented")
+	return getInitialDepositModel(), nil
 }
 
 func updateHomePage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
@@ -448,8 +466,8 @@ func (m *ApplicationModel) updateInputs(msg tea.Msg) tea.Cmd {
 func (m ApplicationModel) View() string {
 	var b strings.Builder
 
-	switch m.focusedInput.Value() {
-	case PAGE_DEPOSIT:
+	switch m.focusedInputIndex {
+	case 1:
 		b.WriteString("Deposit\n")
 		b.WriteString("-------\n")
 		for i := range m.inputs {
