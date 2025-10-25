@@ -69,6 +69,12 @@ type BalanceModel struct {
 	transactions      []Transaction
 }
 
+type UserModel struct {
+	name         string
+	balance      float32
+	transactions []Transaction
+}
+
 func getInitialDepositModel() DepositModel {
 	initialInputs := make(map[int]textinput.Model, 4)
 
@@ -124,9 +130,15 @@ type ApplicationModel struct { // Application State
 	grocyClient       grocy.GrocyClient       // Client
 }
 
-func getInitialApplicationModel() ApplicationModel {
+/**
+* Sets all fields on the Model
+* Set's Prompts for textinputs to be menu options
+ */
+func GetInitialApplicationModel() ApplicationModel {
 	initialInputs := make(map[int]textinput.Model, 4)
 
+	// Setup Inputs with Labels
+	// TOOD: These should not be textinputs.
 	for idx, current := range initialInputs {
 		switch idx {
 		case 0:
@@ -140,29 +152,7 @@ func getInitialApplicationModel() ApplicationModel {
 		}
 	}
 
-	return ApplicationModel{
-		focusedInputIndex: 0,
-		inputs:            initialInputs,
-		focusedInput:      initialInputs[0],
-	}
-}
-
-func (m ApplicationModel) Init() tea.Cmd {
-	if m.focusedInput == PAGE_HOME || m.focusedInput == PAGE_BALANCE {
-		getInitialApplicationModel()
-		return cursor.Blink
-	} else {
-		return textinput.Blink
-	}
-}
-
-// Initialize the Application State, Return Model
-
-func InitialModel() ApplicationModel {
-	m := ApplicationModel{
-		currentPageInputs: make(map[int]textinput.Model, 3),
-	}
-
+	// Set up Grocy Client
 	config := grocy.GrocyConfig{
 		GROCY_URL: os.Getenv("GROCY_URL"),
 	}
@@ -172,27 +162,66 @@ func InitialModel() ApplicationModel {
 
 	grocyClient := grocy.NewGrocyClient(config.GROCY_URL)
 
-	// Ensure Allowance Exists
+	// Ensure Allowance Entity Exists in Grocy
 	if !grocyClient.HasAllowance() {
 		log.Default().Println("Allowance not found. Setting up new userentity")
 		grocyClient.InitAllowance()
 	}
 
-	// Initial Menu Options
-	m.inputs = []string{PAGE_HOME, PAGE_DEPOSIT, PAGE_WITHDRAWL, PAGE_BALANCE}
-	m.focusedInput = PAGE_HOME
-	m.grocyClient = *grocyClient
-
-	return m
+	return ApplicationModel{
+		focusedInputIndex: 0,
+		inputs:            initialInputs,
+		focusedInput:      initialInputs[0],
+		grocyClient:       *grocyClient,
+	}
 }
 
-func (m ApplicationModel) initDepositModel() tea.Cmd {
+func (m ApplicationModel) Init() tea.Cmd {
+	if m.focusedInput.Value() == PAGE_HOME || m.focusedInput.Value() == PAGE_BALANCE {
+		GetInitialApplicationModel()
+		return cursor.Blink
+	} else {
+		return textinput.Blink
+	}
+}
+
+// // Initialize the Application State, Return Model
+// // Deprecated
+// func InitialModel() ApplicationModel {
+// 	m := ApplicationModel{
+// 		inputs: make(map[int]textinput.Model, 3),
+// 	}
+//
+// 	config := grocy.GrocyConfig{
+// 		GROCY_URL: os.Getenv("GROCY_URL"),
+// 	}
+// 	if config.GROCY_URL == "" {
+// 		log.Fatal("GROCY_URL env variable is not set.")
+// 	}
+//
+// 	grocyClient := grocy.NewGrocyClient(config.GROCY_URL)
+//
+// 	// Ensure Allowance Exists
+// 	if !grocyClient.HasAllowance() {
+// 		log.Default().Println("Allowance not found. Setting up new userentity")
+// 		grocyClient.InitAllowance()
+// 	}
+//
+// 	// Initial Menu Options
+// 	m.inputs = []string{PAGE_HOME, PAGE_DEPOSIT, PAGE_WITHDRAWL, PAGE_BALANCE}
+// 	m.focusedInput = PAGE_HOME
+// 	m.grocyClient = *grocyClient
+//
+// 	return m
+// }
+
+func (m DepositModel) initDepositModel() tea.Cmd {
 	// User, Amount, Description, Date
-	m.currentPageInputs = make(map[int]textinput.Model, 4)
+	m.inputs = make(map[int]textinput.Model, 4)
 
 	// Generate Text Input for each input on the page
 	var t textinput.Model
-	for i := range m.currentPageInputs {
+	for i := range m.inputs {
 		t = textinput.New()
 		t.Cursor.Style = cursorStyle
 		t.CharLimit = 32
@@ -224,7 +253,7 @@ func (m ApplicationModel) initDepositModel() tea.Cmd {
 			t.Placeholder = "Reason"
 		}
 
-		m.currentPageInputs[i] = t
+		m.inputs[i] = t
 
 	}
 
@@ -258,15 +287,37 @@ func (m ApplicationModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Update model with selection when enter pressed
 		case "enter":
+			switch m.focusedInputIndex {
+			case 0:
+				return updateHomePage(msg, m)
+			case 1:
+				return updateDepositPage(msg, m)
+			case 2:
+				return updateWithdrawlPage(msg, m)
+			case 3:
+				return updateBalancePage(msg, m)
+			}
 			// Update the Selected Page
-			if m.focusedInput != "" && m.focusedInput != PAGE_HOME {
+			if m.focusedInputIndex != 0 { // not empty or Home
+				m.focusedInput = m.inputs[m.focusedInputIndex]
 				return updateSelectedPage(msg, m)
 			}
-			m.focusedInput = m.inputs[m.focusedInputIndex]
 			return updateHomePage(msg, m)
 		}
 	}
 	return m, nil
+}
+
+func updateBalancePage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
+	panic("unimplemented")
+}
+
+func updateWithdrawlPage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
+	panic("unimplemented")
+}
+
+func updateDepositPage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
+	panic("unimplemented")
 }
 
 func updateSelectedPage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
@@ -276,7 +327,7 @@ func updateSelectedPage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd)
 
 func updateHomePage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
 	log.Default().Println("Called updateHomePage")
-	panic("unimplemented")
+	return GetInitialApplicationModel(), nil
 }
 
 // func (m ApplicationModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -382,12 +433,12 @@ func updateHomePage(msg tea.KeyMsg, m ApplicationModel) (tea.Model, tea.Cmd) {
 // }
 
 func (m *ApplicationModel) updateInputs(msg tea.Msg) tea.Cmd {
-	cmds := make([]tea.Cmd, len(m.currentPageInputs))
+	cmds := make([]tea.Cmd, len(m.inputs))
 
 	// Only text inputs with Focus() set will response, so it's safe to simply
 	// update all of them here without further logic
-	for i := range m.currentPageInputs {
-		m.currentPageInputs[i], cmds[i] = m.currentPageInputs[i].Update(msg)
+	for i := range m.inputs {
+		m.inputs[i], cmds[i] = m.inputs[i].Update(msg)
 	}
 
 	return tea.Batch(cmds...)
@@ -397,18 +448,18 @@ func (m *ApplicationModel) updateInputs(msg tea.Msg) tea.Cmd {
 func (m ApplicationModel) View() string {
 	var b strings.Builder
 
-	switch m.focusedInput {
+	switch m.focusedInput.Value() {
 	case PAGE_DEPOSIT:
 		b.WriteString("Deposit\n")
 		b.WriteString("-------\n")
-		for i := range m.currentPageInputs {
-			b.WriteString(m.currentPageInputs[i].View())
-			if i < len(m.currentPageInputs)-1 {
+		for i := range m.inputs {
+			b.WriteString(m.inputs[i].View())
+			if i < len(m.inputs)-1 {
 				b.WriteRune('\n')
 			}
 		}
 		button := &blurredButton
-		if m.focusedInputIndex == len(m.currentPageInputs) {
+		if m.focusedInputIndex == len(m.inputs) {
 			button = &focusedButton
 		}
 		fmt.Fprintf(&b, "\n\n%s\n\n", *button)
@@ -426,13 +477,14 @@ func (m ApplicationModel) View() string {
 			}
 
 			// render the row
-			b.WriteString(fmt.Sprintf("%s %s\n", cursor, option))
+			b.WriteString(fmt.Sprintf("%s %s\n", cursor, option.Value()))
 
 		}
 	}
 
 	// footer
 	b.WriteString("\n Press q to quit.\n")
+	b.WriteString(fmt.Sprintf("\nCurrent Index: %d", m.focusedInputIndex))
 
 	// send to UI for rendering
 	return b.String()

@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	p := tea.NewProgram(tui.InitialModel())
+	p := tea.NewProgram(tui.GetInitialApplicationModel())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
